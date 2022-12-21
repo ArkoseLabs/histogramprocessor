@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -129,7 +128,7 @@ func histogramToMetrics(metrics []histogramMetric) pmetric.Metrics {
 		m.SetName(metric.name)
 		m.SetEmptyHistogram()
 		hm := m.Histogram().DataPoints()
-		m.Histogram().SetAggregationTemporality(pmetric.MetricAggregationTemporalityDelta)
+		m.Histogram().SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 		for _, value := range metric.points {
 			hdp := hm.AppendEmpty()
 			hdp.SetCount(value.count)
@@ -148,8 +147,7 @@ func TestCases(t *testing.T) {
 			// next stores the results of the filter metric processor
 			next := new(consumertest.MetricsSink)
 			cfg := &Config{
-				ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
-				Metrics:           []string{},
+				//Metrics:           []string{},
 			}
 			factory := NewFactory()
 			mgp, err := factory.CreateMetricsProcessor(
@@ -190,7 +188,7 @@ func TestCases(t *testing.T) {
 					require.Equal(t, eDataPoints.Len(), aDataPoints.Len())
 
 					for j := 0; j < eDataPoints.Len(); j++ {
-						require.Equal(t, eDataPoints.At(j).DoubleVal(), aDataPoints.At(j).DoubleVal(), fmt.Sprintf("Result metric (%s) value differ", eM.Name()))
+						require.Equal(t, eDataPoints.At(j).DoubleValue(), aDataPoints.At(j).DoubleValue(), fmt.Sprintf("Result metric (%s) value differ", eM.Name()))
 					}
 				}
 

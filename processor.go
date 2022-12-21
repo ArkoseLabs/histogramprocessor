@@ -34,7 +34,7 @@ func (hp *histogramProcessor) processMetrics(_ context.Context, md pmetric.Metri
 				switch metric.Type() {
 				case pmetric.MetricTypeHistogram:
 					mh := metric.Histogram()
-					if mh.AggregationTemporality() != pmetric.MetricAggregationTemporalityDelta {
+					if mh.AggregationTemporality() != pmetric.AggregationTemporalityDelta {
 						return false
 					}
 					hp.convertMetrics(mh, metric).MoveAndAppendTo(newMs)

@@ -1,4 +1,4 @@
-module histogramprocessor
+module github.com/ArkoseLabs/histogramprocessor
 
 go 1.18
 

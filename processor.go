@@ -127,6 +127,14 @@ func getPercentileFromBuckets(pf uint64, totalCount uint64, bounds pcommon.Float
 	pf = totalCount * pf / 100
 	left := 0
 	right := counts.Len() - 1
+	/*
+		Right, so what we got here is a non-decreasing list of counts with corresponding boundaries
+		c:[2]___[2]___[3]____[5]____[5]____[6]_____[11]_____[12]
+		b:___[0]___[5]___[10]___[20]___[50]___[100]___[1000]____
+		What we're interested in is the answer of where did the ith measurement fell, for example 4th
+		We need to find indices left and right, in our case 2 & 3, where left < 4 and right >=4.
+		That means that our 4th observation fell between 10 and 20 boundaries
+	*/
 	for (left != right) && (left+1 != right) {
 		middle := (left + right) / 2
 		if counts.At(middle) >= pf {
@@ -137,6 +145,10 @@ func getPercentileFromBuckets(pf uint64, totalCount uint64, bounds pcommon.Float
 	}
 	if right == counts.Len()-1 { // last value, meaning out of bounds.
 		return math.Inf(1)
+	}
+	if counts.At(left) > pf {
+		//we have found a case where value that we are looking for is in the first bucket (below left boundary)
+		return bounds.At(left)
 	}
 	if left == right { // should only happen if we have uniform distribution of points, i.e. no measurements in buckets
 		return bounds.At(right)

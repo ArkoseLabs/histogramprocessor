@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/processor/processortest"
 	"math"
 	"testing"
 	"time"
@@ -60,8 +60,14 @@ var cases = []test{
 					{
 						count:  8,
 						sum:    321,
-						bounds: []float64{1, 5, 10, 20, 50, 75, 100},
+						bounds: []float64{0, 5, 10, 20, 50, 75, 100},
 						counts: []uint64{1, 2, 3, 4, 5, 6, 7, 8},
+					},
+					{
+						count:  3,
+						sum:    0,
+						bounds: []float64{1, 5, 10, 20, 50, 75, 100},
+						counts: []uint64{3, 0, 0, 0, 0, 0, 0, 0},
 					},
 				},
 			},
@@ -69,27 +75,27 @@ var cases = []test{
 		outMetrics: gaugeToMetrics([]gaugeMetric{
 			{
 				name:   "metric_1.p50",
-				points: []float64{40, 85, 20},
+				points: []float64{40, 85, 20, 0},
 			},
 			{
 				name:   "metric_1.p75",
-				points: []float64{62.5, 90, 75},
+				points: []float64{62.5, 90, 75, 0},
 			},
 			{
 				name:   "metric_1.p90",
-				points: []float64{71.875, 95, 100},
+				points: []float64{71.875, 95, 100, 0},
 			},
 			{
 				name:   "metric_1.p95",
-				points: []float64{75, 95, 100},
+				points: []float64{75, 95, 100, 0},
 			},
 			{
 				name:   "metric_1.count",
-				points: []float64{20, 5, 8},
+				points: []float64{20, 5, 8, 3},
 			},
 			{
 				name:   "metric_1.sum",
-				points: []float64{200, 100, 321},
+				points: []float64{200, 100, 321, 0},
 			},
 		}),
 	},
@@ -152,7 +158,7 @@ func TestCases(t *testing.T) {
 			factory := NewFactory()
 			mgp, err := factory.CreateMetricsProcessor(
 				context.Background(),
-				componenttest.NewNopProcessorCreateSettings(),
+				processortest.NewNopCreateSettings(),
 				cfg,
 				next,
 			)

@@ -3,20 +3,21 @@ package histogramprocessor
 import (
 	"context"
 	"fmt"
+	"math"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/processor/processortest"
-	"math"
-	"testing"
-	"time"
 )
 
 type test struct {
 	name       string
-	metricList []string
 	inMetrics  pmetric.Metrics
 	outMetrics pmetric.Metrics
 }
@@ -156,9 +157,10 @@ func TestCases(t *testing.T) {
 				//Metrics:           []string{},
 			}
 			factory := NewFactory()
-			mgp, err := factory.CreateMetricsProcessor(
+			hm := component.MustNewType(histogram)
+			mgp, err := factory.CreateMetrics(
 				context.Background(),
-				processortest.NewNopCreateSettings(),
+				processortest.NewNopSettings(hm),
 				cfg,
 				next,
 			)

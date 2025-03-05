@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	typeStr   = "histogram"
+	histogram   = "histogram"
 	stability = component.StabilityLevelDevelopment
 )
 
@@ -19,7 +19,7 @@ var processorCapabilities = consumer.Capabilities{MutatesData: true}
 // NewFactory creates a factory for the routing processor.
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
-		typeStr,
+		component.MustNewType(histogram),
 		createDefaultConfig,
 		processor.WithMetrics(createMetricsProcessor, stability),
 	)
@@ -31,7 +31,7 @@ func createDefaultConfig() component.Config {
 
 func createMetricsProcessor(
 	ctx context.Context,
-	set processor.CreateSettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Metrics,
 ) (processor.Metrics, error) {
@@ -42,7 +42,7 @@ func createMetricsProcessor(
 
 	metricsProcessor := newHistogramProcessor(processorConfig, set.Logger)
 
-	return processorhelper.NewMetricsProcessor(
+	return processorhelper.NewMetrics(
 		ctx,
 		set,
 		cfg,

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zeebo/assert"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -16,8 +16,21 @@ import (
 	"go.opentelemetry.io/collector/processor/processortest"
 )
 
+// 	"context"
+// 	"fmt"
+// 	"github.com/stretchr/testify/assert"
+// 	"github.com/stretchr/testify/require"
+// 	"go.opentelemetry.io/collector/consumer/consumertest"
+// 	"go.opentelemetry.io/collector/pdata/pcommon"
+// 	"go.opentelemetry.io/collector/pdata/pmetric"
+
+// 	"math"
+// 	"testing"
+// 	"time"
+
 type test struct {
 	name       string
+	metricList []string
 	inMetrics  pmetric.Metrics
 	outMetrics pmetric.Metrics
 }
@@ -157,10 +170,10 @@ func TestCases(t *testing.T) {
 				//Metrics:           []string{},
 			}
 			factory := NewFactory()
-			hm := component.MustNewType(histogram)
+			hg := component.MustNewType("histogram")
 			mgp, err := factory.CreateMetrics(
 				context.Background(),
-				processortest.NewNopSettings(hm),
+				processortest.NewNopSettings(hg),
 				cfg,
 				next,
 			)

@@ -3,6 +3,7 @@ package histogramprocessor
 import (
 	"context"
 	"fmt"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/processor"
@@ -10,23 +11,27 @@ import (
 )
 
 const (
-	typeStr   = "histogram"
+	// The value of "type" key in configuration.
+	typeStr = "histogram"
+	// The stability level of the processor.
 	stability = component.StabilityLevelDevelopment
 )
 
 var processorCapabilities = consumer.Capabilities{MutatesData: true}
 
-// NewFactory creates a factory for the routing processor.
+// NewFactory creates a factory for the histogram processor.
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
-		typeStr,
+		component.MustNewType(typeStr),
 		createDefaultConfig,
 		processor.WithMetrics(createMetricsProcessor, stability),
 	)
 }
 
 func createDefaultConfig() component.Config {
-	return &Config{}
+	cfg := &Config{}
+	cfg.setDefaults()
+	return cfg
 }
 
 func createMetricsProcessor(

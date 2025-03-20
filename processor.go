@@ -2,15 +2,17 @@ package histogramprocessor
 
 import (
 	"context"
+	"math"
+	"strconv"
+
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
-	"math"
-	"strconv"
 )
 
 type histogramProcessor struct {
 	logger     *zap.Logger
+	config     *Config
 	cancelFunc context.CancelFunc
 }
 
@@ -18,6 +20,7 @@ func newHistogramProcessor(config *Config, logger *zap.Logger) *histogramProcess
 	_, cancel := context.WithCancel(context.Background())
 	p := &histogramProcessor{
 		logger:     logger,
+		config:     config,
 		cancelFunc: cancel,
 	}
 	return p
@@ -53,58 +56,106 @@ func (hp *histogramProcessor) processMetrics(_ context.Context, md pmetric.Metri
 
 func (hp *histogramProcessor) convertMetrics(in pmetric.Histogram, metric pmetric.Metric) pmetric.MetricSlice {
 	newMs := pmetric.NewMetricSlice()
-	percentiles := []string{"50", "75", "90", "95"}
-	newMs.EnsureCapacity(len(percentiles) + 2)
-	for _, p := range percentiles {
-		initMetric(in, metric, newMs, "p"+p)
+	percentiles := hp.config.Percentiles
+
+	// Calculate capacity: percentiles + potential count and sum
+	capacity := len(percentiles)
+	if *hp.config.IncludeCount {
+		capacity++
 	}
-	// count and sum
-	initMetric(in, metric, newMs, "count")
-	initMetric(in, metric, newMs, "sum")
+	if *hp.config.IncludeSum {
+		capacity++
+	}
+
+	newMs.EnsureCapacity(capacity)
+	separator := hp.config.GetSeparator()
+
+	// Create metrics for percentiles
+	for _, p := range percentiles {
+		initMetric(in, metric, newMs, separator+"p"+p)
+	}
+
+	// Add count and sum if configured
+	countIdx := -1
+	sumIdx := -1
+
+	if *hp.config.IncludeCount {
+		countIdx = newMs.Len()
+		initMetric(in, metric, newMs, separator+"count")
+	}
+
+	if *hp.config.IncludeSum {
+		sumIdx = newMs.Len()
+		initMetric(in, metric, newMs, separator+"sum")
+	}
 
 	for i := 0; i < in.DataPoints().Len(); i++ {
 		hDP := in.DataPoints().At(i)
 		bounds := hDP.ExplicitBounds()
 		counts := hDP.BucketCounts()
 		totalCount := hDP.Count()
-		putDP(newMs.At(len(percentiles)), hDP, float64(hDP.Count()))
-		putDP(newMs.At(len(percentiles)+1), hDP, hDP.Sum())
+
+		// Add count and sum metrics if configured
+		if countIdx >= 0 {
+			putDP(newMs.At(countIdx), hDP, float64(totalCount))
+		}
+
+		if sumIdx >= 0 {
+			putDP(newMs.At(sumIdx), hDP, hDP.Sum())
+		}
+
 		if totalCount == 0 {
-			// don't send precalculated histogram metrics, as they are useless
+			// skip percentile calculations for empty histograms
 			continue
 		}
 
 		if counts.Len() > 0 && counts.Len() != bounds.Len()+1 {
+			hp.logger.Warn("Bucket counts length doesn't match bounds length + 1",
+				zap.Int("counts_len", counts.Len()),
+				zap.Int("bounds_len", bounds.Len()),
+				zap.String("metric_name", metric.Name()))
 			continue
 		}
 
-		if counts.At(counts.Len()-1) != totalCount {
-			preprocessBuckets(hDP.BucketCounts())
+		// Create a copy of counts for processing to avoid modifying the original data
+		cumulativeCounts := pcommon.NewUInt64Slice()
+		cumulativeCounts.EnsureCapacity(counts.Len())
+		for j := 0; j < counts.Len(); j++ {
+			cumulativeCounts.Append(counts.At(j))
 		}
 
-		for i, p := range percentiles {
-			newM := newMs.At(i)
+		// Ensure cumulative bucket counts
+		if cumulativeCounts.At(cumulativeCounts.Len()-1) != totalCount {
+			preprocessBuckets(cumulativeCounts)
+		}
+
+		for j, p := range percentiles {
 			pf, err := strconv.ParseUint(p, 10, 64)
 			if err != nil {
+				hp.logger.Warn("Failed to parse percentile", zap.String("percentile", p), zap.Error(err))
 				continue
 			}
-			putDP(newM, hDP, getPercentileFromBuckets(pf, totalCount, bounds, counts))
+			percentileValue := getPercentileFromBuckets(pf, totalCount, bounds, cumulativeCounts)
+			putDP(newMs.At(j), hDP, percentileValue)
 		}
 	}
+
+	// Remove any metrics with no data points
 	newMs.RemoveIf(func(metric pmetric.Metric) bool {
 		return metric.Gauge().DataPoints().Len() == 0
 	})
+
 	return newMs
 }
 
+// preprocessBuckets converts non-cumulative bucket counts to cumulative
 func preprocessBuckets(counts pcommon.UInt64Slice) {
-	for i := 0; i < counts.Len(); i++ {
-		if i > 0 {
-			counts.SetAt(i, counts.At(i-1)+counts.At(i))
-		}
+	for i := 1; i < counts.Len(); i++ {
+		counts.SetAt(i, counts.At(i-1)+counts.At(i))
 	}
 }
 
+// putDP adds a new data point to the gauge metric with values from the histogram data point
 func putDP(newM pmetric.Metric, hDP pmetric.HistogramDataPoint, value float64) {
 	gDP := newM.Gauge().DataPoints().AppendEmpty()
 	hDP.Attributes().CopyTo(gDP.Attributes())
@@ -115,53 +166,75 @@ func putDP(newM pmetric.Metric, hDP pmetric.HistogramDataPoint, value float64) {
 	gDP.SetDoubleValue(value)
 }
 
-func initMetric(in pmetric.Histogram, metric pmetric.Metric, newMs pmetric.MetricSlice, p string) {
+// initMetric creates a new gauge metric with the specified suffix
+func initMetric(in pmetric.Histogram, metric pmetric.Metric, newMs pmetric.MetricSlice, suffix string) {
 	newM := newMs.AppendEmpty()
-	newM.SetName(metric.Name() + "." + p)
+	newM.SetName(metric.Name() + suffix)
 	newM.SetDescription(metric.Description())
 	newM.SetUnit(metric.Unit())
 	newM.SetEmptyGauge().DataPoints().EnsureCapacity(in.DataPoints().Len())
 }
 
+// getPercentileFromBuckets calculates the percentile value from histogram buckets
 func getPercentileFromBuckets(pf uint64, totalCount uint64, bounds pcommon.Float64Slice, counts pcommon.UInt64Slice) float64 {
-	pf = totalCount * pf / 100
+	// Calculate the count threshold for the percentile
+	threshold := totalCount * pf / 100
+
+	// Edge case: if threshold is 0, return the lowest bound or -infinity
+	if threshold == 0 {
+		if bounds.Len() > 0 {
+			return bounds.At(0)
+		}
+		return math.Inf(-1)
+	}
+
+	// Binary search to find the bucket containing the percentile
 	left := 0
 	right := counts.Len() - 1
-	/*
-		Right, so what we got here is a non-decreasing list of counts with corresponding boundaries
-		c:[2]___[2]___[3]____[5]____[5]____[6]_____[11]_____[12]
-		b:___[0]___[5]___[10]___[20]___[50]___[100]___[1000]____
-		What we're interested in is the answer of where did the ith measurement fell, for example 4th
-		We need to find indices left and right, in our case 2 & 3, where left < 4 and right >=4.
-		That means that our 4th observation fell between 10 and 20 boundaries
-	*/
+
 	for (left != right) && (left+1 != right) {
 		middle := (left + right) / 2
-		if counts.At(middle) >= pf {
+		if counts.At(middle) >= threshold {
 			right = middle
 		} else {
 			left = middle
 		}
 	}
-	if right == counts.Len()-1 { // last value, meaning out of bounds.
+
+	// Handle edge cases
+	if right == counts.Len()-1 && counts.At(left) < threshold {
+		// Value is in the overflow bucket
 		return math.Inf(1)
 	}
-	if counts.At(left) > pf {
-		//we have found a case where value that we are looking for is in the first bucket (below left boundary)
+
+	if counts.At(left) >= threshold {
+		// Value is in or below the first bucket
+		if left == 0 {
+			// Below the first bound - use the lower bound
+			if bounds.Len() > 0 {
+				return bounds.At(0)
+			}
+			return math.Inf(-1)
+		}
 		return bounds.At(left)
 	}
-	if left == right { // should only happen if we have uniform distribution of points, i.e. no measurements in buckets
+
+	if left == right {
+		// Uniform distribution within the bucket
 		return bounds.At(right)
 	}
-	// calculate point value depending on measurement counts in the bucket
 
+	// Linear interpolation within the bucket
 	lbound := bounds.At(left)
 	rbound := bounds.At(right)
 	bucketCounts := counts.At(right) - counts.At(left)
-	countOffset := pf - counts.At(left)
+	countOffset := threshold - counts.At(left)
+
+	// Calculate the position within the bucket and interpolate
 	return ((rbound-lbound)/float64(bucketCounts+1))*float64(1+countOffset) + lbound
 }
 
+// shutdown is called when the processor is being shut down
 func (hp *histogramProcessor) shutdown(context.Context) error {
 	hp.cancelFunc()
 	return nil

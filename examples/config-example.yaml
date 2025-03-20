@@ -1,0 +1,40 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+  # Histogram processor configuration
+  histogram:
+    # Custom list of percentiles (optional)
+    percentiles: ["50", "75", "90", "95", "99"]
+
+    # Include count metric (default is true)
+    include_count: true
+
+    # Include sum metric (default is true)
+    include_sum: true
+
+    # Metric name suffix format: "standard" or "underscored"
+    # - standard: test_histogram.p95
+    # - underscored: test_histogram_p95
+    metric_name_suffix: "standard"
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:9090
+
+  logging:
+    verbosity: detailed
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch, histogram]
+      exporters: [prometheus, logging]
